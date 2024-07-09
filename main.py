@@ -1,7 +1,6 @@
 import subprocess
 import sys
 import torch
-from llm_finetuner.utils.ssh_tunnel import start_tunnel, stop_tunnel
 import requests
 import json
 import os
@@ -9,9 +8,18 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import prepare_model_for_kbit_training, LoraConfig, get_peft_model
 from datasets import load_dataset
 import transformers
+from llm_finetuner.utils.ssh_tunnel import start_tunnel, stop_tunnel
 
-# Set the PyTorch MPS high watermark ratio
-os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.7"
+# Remove the PyTorch MPS high watermark ratio environment variable if it exists
+if 'PYTORCH_MPS_HIGH_WATERMARK_RATIO' in os.environ:
+    del os.environ['PYTORCH_MPS_HIGH_WATERMARK_RATIO']
+
+# Set the PyTorch MPS fallback environment variable
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+
+# Verify the environment variable is set
+print(f"PYTORCH_MPS_HIGH_WATERMARK_RATIO: {os.getenv('PYTORCH_MPS_HIGH_WATERMARK_RATIO')}")
+print(f"PYTORCH_ENABLE_MPS_FALLBACK: {os.getenv('PYTORCH_ENABLE_MPS_FALLBACK')}")
 
 # Function to install packages
 def install(*packages):
@@ -20,6 +28,7 @@ def install(*packages):
 # Install required packages
 install("torch", "--pre", "--extra-index-url", "https://download.pytorch.org/whl/nightly/cpu")
 install("transformers")
+install("datasets")
 install("accelerate")
 # Optionally install bitsandbytes if supported
 # install("bitsandbytes")
@@ -79,18 +88,26 @@ def train_model():
         print("MPS device not found. Exiting.")
         exit(1)
 
-    model_id = "EleutherAI/gpt-neox-20b"
+    model_id = "gpt2"  # Switch to a smaller model
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
+    
     model.to("mps")
     
     model.gradient_checkpointing_enable()
     model = prepare_model_for_kbit_training(model)
     
+    # Print all module names to identify the correct target modules
+    for name, module in model.named_modules():
+        print(name)
+    
+    # Use the identified target modules for GPT-2
+    target_modules = ["attn.c_attn", "attn.c_proj"]
+
     config = LoraConfig(
         r=8, 
         lora_alpha=32, 
-        target_modules=["query_key_value"], 
+        target_modules=target_modules, 
         lora_dropout=0.05, 
         bias="none", 
         task_type="CAUSAL_LM"
@@ -111,8 +128,13 @@ def train_model():
 
     print_trainable_parameters(model)
 
-    data = load_dataset("Abirate/english_quotes")
-    data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+    # Load the dataset
+    try:
+        data = load_dataset("Abirate/english_quotes")
+        data = data.map(lambda samples: tokenizer(samples["quote"]), batched=True)
+    except ValueError as e:
+        print(f"Error loading dataset: {e}")
+        return
 
     tokenizer.pad_token = tokenizer.eos_token
 
@@ -120,8 +142,8 @@ def train_model():
         model=model,
         train_dataset=data["train"],
         args=transformers.TrainingArguments(
-            per_device_train_batch_size=1,
-            gradient_accumulation_steps=4,
+            per_device_train_batch_size=1,  # Reduce batch size
+            gradient_accumulation_steps=2,  # Reduce gradient accumulation steps
             warmup_steps=2,
             max_steps=10,
             learning_rate=2e-4,
@@ -129,10 +151,11 @@ def train_model():
             output_dir="outputs",
             save_steps=5,  # Save checkpoints less frequently
             save_total_limit=1,  # Only keep the last checkpoint
+            bf16=True  # Use bf16 mixed precision for MPS compatibility
         ),
         data_collator=transformers.DataCollatorForLanguageModeling(tokenizer, mlm=False),
     )
-    model.config.use_cache = False  # silence the warnings. Please re-enable for inference!
+    model.config.use_cache = False  # Silence the warnings. Please re-enable for inference!
     torch.cuda.empty_cache()  # Clear cache to free up memory before training
     trainer.train()
     model_to_save = trainer.model.module if hasattr(trainer.model, 'module') else trainer.model  # Take care of distributed/parallel training
@@ -143,7 +166,7 @@ def run_inference(text):
         print("MPS device not found. Exiting.")
         exit(1)
 
-    model_id = "EleutherAI/gpt-neox-20b"
+    model_id = "gpt2"  # Switch to a smaller model
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = AutoModelForCausalLM.from_pretrained(model_id)
     model.to("mps")
@@ -153,7 +176,16 @@ def run_inference(text):
 
     device = torch.device("mps")
     inputs = tokenizer(text, return_tensors="pt").to(device)
+    
+    # Move necessary parts to CPU for specific operation
+    inputs = {k: v.to("cpu") for k, v in inputs.items()}
+    model = model.to("cpu")
+    
     outputs = model.generate(**inputs, max_new_tokens=20)
+    
+    # Move model back to MPS if needed
+    model.to(device)
+    
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 if __name__ == "__main__":
@@ -178,8 +210,3 @@ if __name__ == "__main__":
         print("Stopping SSH tunnel...")
         stop_tunnel()
         print("SSH tunnel stopped.")
-
-'''export IMAGINATION_IP="imagination.mat.ucsb.edu"
-export SSH_USERNAME="raghav"
-export SSH_PKEY="/Users/raghav/.ssh/id_rsa"
-export LOCAL_PORT="56789"'''

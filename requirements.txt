@@ -32,7 +32,7 @@ contourpy==1.2.0
 contractions==0.1.73
 cryptography==42.0.8
 cycler==0.12.1
-datasets==2.2.1
+datasets==2.20.0
 debugpy==1.8.0
 decorator==5.1.1
 defusedxml==0.7.1
@@ -50,7 +50,7 @@ flake8-bugbear==24.4.26
 fonttools==4.47.0
 fqdn==1.5.1
 frozenlist==1.4.1
-fsspec==2024.6.1
+fsspec==2024.5.0
 future @ file:///System/Volumes/Data/SWE/Apps/DT/BuildRoots/BuildRoot11/ActiveBuildRoot/Library/Caches/com.apple.xbs/Sources/python3/python3-141/future-0.18.2-py3-none-any.whl
 fuzzywuzzy==0.18.0
 gitdb==4.0.11
@@ -152,6 +152,7 @@ py-gfm==2.0.0
 py-rouge==1.1
 pyahocorasick==2.1.0
 pyarrow==16.1.0
+pyarrow-hotfix==0.6
 pyasn1==0.6.0
 pyasn1_modules==0.4.0
 pycodestyle==2.12.0
@@ -174,7 +175,7 @@ rdkit==2023.9.6
 rdkit-pypi==2022.9.5
 referencing==0.30.2
 regex==2024.5.15
-requests==2.31.0
+requests==2.32.3
 requests-mock==1.12.1
 responses==0.18.0
 rfc3339-validator==0.1.4
@@ -218,7 +219,7 @@ torchtext==0.18.0
 torchvision==0.18.1
 torchviz==0.0.2
 tornado==6.3.3
-tqdm==4.62.3
+tqdm==4.66.4
 traitlets==5.11.2
 transformers @ git+https://github.com/huggingface/transformers.git@594c1610fa6243b2ffb670c49faf389ca5121939
 types-python-dateutil==2.8.19.14
